@@ -1,0 +1,4 @@
+Keychain
+========
+
+A ruby wrapper around some of OS X's keychain functions
