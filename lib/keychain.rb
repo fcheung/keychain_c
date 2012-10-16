@@ -36,7 +36,7 @@ class Keychain
   Alias                       = 'alis'
 
   def inspect
-    "<Keychain 0x#{self.object_id.to_s(16)}: #{path}"
+    "<Keychain 0x#{self.object_id.to_s(16)}: #{path}>"
   end
 end
 
