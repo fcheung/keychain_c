@@ -1,4 +1,5 @@
 #include "ruby.h"
+#include "ruby/encoding.h"
 #include <Security/Security.h>
 
 VALUE rb_cKeychain;
@@ -6,7 +7,18 @@ VALUE rb_cKeychainError;
 
 static void CheckOSStatusOrRaise(OSStatus err){
   if(err != 0){
-    rb_raise(rb_cKeychainError, "OSStatus error: %d", err);
+    CFStringRef description = SecCopyErrorMessageString(err, NULL);
+
+    CFIndex bufferSize = CFStringGetMaximumSizeForEncoding(CFStringGetLength(description), kCFStringEncodingUTF8);
+    char *buffer = malloc(bufferSize + 1);
+    CFStringGetCString(description, buffer, bufferSize + 1, kCFStringEncodingUTF8);
+    CFRelease(description);
+
+    VALUE exceptionString = rb_enc_str_new(buffer, strlen(buffer), rb_utf8_encoding());
+    free(buffer);
+    VALUE exception = rb_obj_alloc(rb_cKeychainError);
+    rb_funcall(exception, rb_intern("initialize"), 2,exceptionString, INT2FIX(err));
+    rb_exc_raise(exception);
   }
 }
 static VALUE KeychainFromSecKeychainRef(SecKeychainRef keychainRef){

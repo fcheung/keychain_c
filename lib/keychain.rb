@@ -1,5 +1,11 @@
 class Keychain
   class Error < StandardError
+    attr_accessor :code
+    def initialize(message, code)
+      self.code = code
+      super message
+    end
+
   end
 
   InternetPasswordItemClass = 'inet' #kSecInternetPasswordItemClass
