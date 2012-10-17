@@ -28,14 +28,16 @@ static VALUE KeychainFromSecKeychainRef(SecKeychainRef keychainRef){
 
 static VALUE rb_default_keychain(VALUE self){
   SecKeychainRef keychain=NULL;
-  SecKeychainCopyDefault(&keychain);
+  OSStatus result =SecKeychainCopyDefault(&keychain);
+  CheckOSStatusOrRaise(result);
 
   return KeychainFromSecKeychainRef(keychain);
 }
 
 static VALUE rb_open_keychain(VALUE self, VALUE path){
   SecKeychainRef keychain=NULL;
-  SecKeychainOpen(StringValueCStr(path), &keychain);
+  OSStatus result =SecKeychainOpen(StringValueCStr(path), &keychain);
+  CheckOSStatusOrRaise(result);
 
   return KeychainFromSecKeychainRef(keychain);
 }
