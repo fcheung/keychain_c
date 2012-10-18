@@ -80,9 +80,9 @@ static void cf_hash_to_rb_hash(const void *raw_key, const void * raw_value, void
       CFNumberGetValue(value, kCFNumberDoubleType, &doubleValue);
       rubyValue = rb_float_new(doubleValue);
     }else{
-      long longValue;
-      CFNumberGetValue(value, kCFNumberLongType, &longValue);
-      rubyValue = LONG2NUM(longValue);
+      long long longValue;
+      CFNumberGetValue(value, kCFNumberLongLongType, &longValue);
+      rubyValue = LL2NUM(longValue);
     }
   }
   else if (CFDateGetTypeID() == CFGetTypeID(value)){
@@ -118,10 +118,11 @@ static void rb_add_value_to_cf_dictionary(CFMutableDictionaryRef dict, CFStringR
         CFRelease(stringValue);
       }
       break;
+    case T_BIGNUM:
     case T_FIXNUM:
       {
-        long value = FIX2LONG(value);
-        CFNumberRef numberValue = CFNumberCreate(NULL,kCFNumberLongType,&value);
+        long long value = NUM2LL(value);
+        CFNumberRef numberValue = CFNumberCreate(NULL,kCFNumberLongLongType,&value);
         CFDictionarySetValue(dict,key,numberValue);
         CFRelease(numberValue);
         break;
