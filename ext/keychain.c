@@ -122,6 +122,18 @@ static void cf_hash_to_rb_hash(const void *raw_key, const void * raw_value, void
     Boolean booleanValue = CFBooleanGetValue(value);
     rubyValue = booleanValue ? Qtrue : Qfalse;
   }
+  else if(CFNumberGetTypeID() == CFGetTypeID(value)){
+    if(CFNumberIsFloatType(value))
+    {
+      double doubleValue;
+      CFNumberGetValue(value, kCFNumberDoubleType, &doubleValue);
+      rubyValue = rb_float_new(doubleValue);
+    }else{
+      long longValue;
+      CFNumberGetValue(value, kCFNumberLongType, &longValue);
+      rubyValue = LONG2NUM(longValue);
+    }
+  }
   else if (CFDateGetTypeID() == CFGetTypeID(value)){
     CFDateRef date = (CFDateRef) value;
     CFAbsoluteTime abs_time = CFDateGetAbsoluteTime(date);
