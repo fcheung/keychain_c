@@ -118,6 +118,10 @@ static void cf_hash_to_rb_hash(const void *raw_key, const void * raw_value, void
   if(CFStringGetTypeID() == CFGetTypeID(value)){
     rubyValue = cfstring_to_rb_string((CFStringRef)value);
   }
+  else if(CFBooleanGetTypeID() == CFGetTypeID(value)){
+    Boolean booleanValue = CFBooleanGetValue(value);
+    rubyValue = booleanValue ? Qtrue : Qfalse;
+  }
   else if (CFDateGetTypeID() == CFGetTypeID(value)){
     CFDateRef date = (CFDateRef) value;
     CFAbsoluteTime abs_time = CFDateGetAbsoluteTime(date);
