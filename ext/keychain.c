@@ -148,30 +148,6 @@ static void cf_hash_to_rb_hash(const void *raw_key, const void * raw_value, void
   }
 }
 
-static VALUE rb_keychain_item_copy_attributes(VALUE self){
-
-  SecKeychainItemRef keychainItem=NULL;
-  Data_Get_Struct(self, struct OpaqueSecKeychainItemRef, keychainItem);
-
-  CFMutableDictionaryRef query = CFDictionaryCreateMutable(NULL, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
-  CFArrayRef itemsToSearch = CFArrayCreate(NULL, (const void**)&keychainItem, 1, &kCFTypeArrayCallBacks);
-
-  CFDictionaryAddValue(query, kSecMatchItemList, itemsToSearch);
-  CFDictionaryAddValue(query, kSecReturnAttributes, kCFBooleanTrue);
-  CFDictionaryAddValue(query, kSecClass, kSecClassGenericPassword);
-  CFRelease(itemsToSearch);
-  CFDictionaryRef result;
-  OSStatus status = SecItemCopyMatching(query, (CFTypeRef*)&result);
-  CFRelease(query);
-  CheckOSStatusOrRaise(status);
-
-  VALUE attributes = rb_hash_new();
-  CFDictionaryApplyFunction(result, cf_hash_to_rb_hash, (void*)attributes);
-  CFRelease(result);
-  return attributes;
-
-}
-
 static VALUE rb_keychain_item_copy_password(VALUE self){
   void *data;
   SecKeychainItemRef keychainItem=NULL;
@@ -210,13 +186,21 @@ static VALUE rb_keychain_add_generic_password(VALUE self, VALUE rb_service, VALU
   return Data_Wrap_Struct(rb_cKeychainItem, NULL, CFRelease, keychainItem);
 }
 
+static CFStringRef rb_create_cf_string(VALUE string){
+  string = rb_str_export_to_enc(string, rb_utf8_encoding());
+  char * c_string= StringValueCStr(string);
+  return CFStringCreateWithCString(NULL, c_string, kCFStringEncodingUTF8);
+}
+
+
 static VALUE rb_search_keychain(int argc, VALUE *argv, VALUE self){
   VALUE arrayOrKeychainsOrNil;
   VALUE attributes;
 
   rb_scan_args(argc, argv, "01:", &arrayOrKeychainsOrNil, &attributes);
 
-  CFTypeRef keychainsToSearch = NULL;
+  CFMutableDictionaryRef query = CFDictionaryCreateMutable(NULL, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+  CFArrayRef keychainsToSearch = NULL;
   
   switch (TYPE(arrayOrKeychainsOrNil)) {
     case T_NIL:
@@ -232,64 +216,56 @@ static VALUE rb_search_keychain(int argc, VALUE *argv, VALUE self){
       keychainsToSearch = searchArray;
     }  
       break;
-
-    case T_DATA:
-      Data_Get_Struct(arrayOrKeychainsOrNil, struct OpaqueSecKeychainRef, keychainsToSearch);
-      CFRetain(keychainsToSearch);
-      break;
     default:
       rb_raise(rb_eTypeError, "searchPath should be a keychain, array of keychains or NULL was %d",TYPE(arrayOrKeychainsOrNil));
       break;
   }
+  if(keychainsToSearch){
+    CFDictionaryAddValue(query, kSecMatchSearchList, keychainsToSearch);
+    CFRelease(keychainsToSearch);
+  }
 
-  UInt32 service_length = 0;
-  char * service_data = NULL;
-  UInt32 account_length = 0;
-  char * account_data = NULL;
+  CFDictionaryAddValue(query, kSecReturnAttributes, kCFBooleanTrue);
+  CFDictionaryAddValue(query, kSecReturnRef, kCFBooleanTrue);
+  CFDictionaryAddValue(query, kSecClass, kSecClassGenericPassword);
+
   
   if(attributes){
     VALUE rb_service = rb_hash_aref(attributes, ID2SYM(rb_intern("service")));
     if(RTEST(rb_service)){
-      StringValue(rb_service);
-      service_length = (UInt32)RSTRING_LEN(rb_service);
-      service_data = malloc(service_length);
-      memcpy(service_data, RSTRING_PTR(rb_service), service_length);
+      CFStringRef service = rb_create_cf_string(rb_service);
+      CFDictionaryAddValue(query, kSecAttrService, service);
+      CFRelease(service);
     }
 
     VALUE rb_account = rb_hash_aref(attributes, ID2SYM(rb_intern("account")));
     if(RTEST(rb_account)){
-      StringValue(rb_account);
-      account_length = (UInt32)RSTRING_LEN(rb_account);
-      account_data = malloc(account_length);
-      memcpy(account_data, RSTRING_PTR(rb_account), account_length);
+      CFStringRef account = rb_create_cf_string(rb_account);
+      CFDictionaryAddValue(query, kSecAttrAccount, account);
+      CFRelease(account);
     }
+
   }
 
-  SecKeychainItemRef item = NULL;
+  CFDictionaryRef result;
+  OSStatus status = SecItemCopyMatching(query, (CFTypeRef*)&result);
+  CFRelease(query);
 
-  void *passwordData;
-  UInt32 passwordLength;
-  OSStatus result = SecKeychainFindGenericPassword(keychainsToSearch,  service_length, service_data, account_length, account_data, NULL, NULL, &item);
-
-  if(keychainsToSearch){
-    CFRelease(keychainsToSearch);
-  }
-  if(service_data){
-    free(service_data);
-    service_data = NULL;
-  }
-  if(account_data){
-    free(account_data);
-    account_data = NULL;
-  }
-
-  if(result == errSecItemNotFound){
+  if(status == errSecItemNotFound){
     return Qnil;
   }else{
-    CheckOSStatusOrRaise(result);
+    CheckOSStatusOrRaise(status);
   }
 
-  return Data_Wrap_Struct(rb_cKeychainItem, NULL, CFRelease, item);
+  SecKeychainItemRef item = (SecKeychainItemRef) CFDictionaryGetValue(result, kSecValueRef);
+
+  CFRetain(item);
+  VALUE rb_item = Data_Wrap_Struct(rb_cKeychainItem, NULL, CFRelease, item);
+  VALUE keychain_item_attributes = rb_hash_new();
+  CFDictionaryApplyFunction(result, cf_hash_to_rb_hash, (void*)keychain_item_attributes);
+  CFRelease(result);
+  rb_ivar_set(rb_item, rb_intern("@attributes"), keychain_item_attributes);
+  return rb_item;
 }
 
 void Init_keychain(){
@@ -310,7 +286,6 @@ void Init_keychain(){
   rb_cKeychainItem = rb_define_class_under(rb_cKeychain, "Item", rb_cObject);
 
   rb_define_method(rb_cKeychainItem, "delete", RUBY_METHOD_FUNC(rb_keychain_item_delete), 0);
-  rb_define_method(rb_cKeychainItem, "copy_attributes", RUBY_METHOD_FUNC(rb_keychain_item_copy_attributes), 0);
   rb_define_method(rb_cKeychainItem, "password", RUBY_METHOD_FUNC(rb_keychain_item_copy_password), 0);
 
 

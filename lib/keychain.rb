@@ -71,16 +71,12 @@ class Keychain::Item
 
   KEYCHAIN_INVERSE_MAP = KEYCHAIN_MAP.invert
 
-  def attributes
-    @attributes ||= copy_attributes
-  end
-
   KEYCHAIN_INVERSE_MAP.each do |ruby_name, attr_name|
     define_method ruby_name do
-      attributes[attr_name]
+      @attributes[attr_name]
     end
     define_method ruby_name.to_s+'=' do |value|
-      attributes[attr_name] = value
+      @attributes[attr_name] = value
     end
   end
 end

@@ -50,16 +50,6 @@ describe Keychain do
         Keychain.search([@keychain_2], :service => 'aservice-1').should be_nil
       end
     end
-
-    context 'when a single keychain is given' do
-      it 'should search the specified keychains' do
-        Keychain.search(@keychain_2, :service => 'aservice-2').password.should == 'some-password-2'
-      end
-
-      it 'should not return results from other keychains' do
-        Keychain.search(@keychain_2, :service => 'aservice-1').should be_nil
-      end
-    end
   
     after(:each) do
       @keychain_1.delete
