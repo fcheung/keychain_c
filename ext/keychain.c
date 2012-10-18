@@ -366,11 +366,51 @@ void build_keychain_sec_map(void){
   rb_const_set(rb_cKeychain, rb_intern("KEYCHAIN_MAP"), rb_cKeychainSecMap);
 }
 
+void build_protocols(void){
+  VALUE protocols = rb_define_module_under(rb_cKeychain, "Protocols");
+
+  rb_const_set(protocols, rb_intern("FTP"), INT2NUM(kSecProtocolTypeFTP       ));
+  rb_const_set(protocols, rb_intern("FTPAccount"), INT2NUM(kSecProtocolTypeFTPAccount));
+  rb_const_set(protocols, rb_intern("HTTP"), INT2NUM(kSecProtocolTypeHTTP      ));
+  rb_const_set(protocols, rb_intern("IRC"), INT2NUM(kSecProtocolTypeIRC       ));
+  rb_const_set(protocols, rb_intern("NNTP"), INT2NUM(kSecProtocolTypeNNTP      ));
+  rb_const_set(protocols, rb_intern("POP3"), INT2NUM(kSecProtocolTypePOP3      ));
+  rb_const_set(protocols, rb_intern("SMTP"), INT2NUM(kSecProtocolTypeSMTP      ));
+  rb_const_set(protocols, rb_intern("SOCKS"), INT2NUM(kSecProtocolTypeSOCKS     ));
+  rb_const_set(protocols, rb_intern("IMAP"), INT2NUM(kSecProtocolTypeIMAP      ));
+  rb_const_set(protocols, rb_intern("LDAP"), INT2NUM(kSecProtocolTypeLDAP      ));
+  rb_const_set(protocols, rb_intern("AppleTalk"), INT2NUM(kSecProtocolTypeAppleTalk ));
+  rb_const_set(protocols, rb_intern("AFP"), INT2NUM(kSecProtocolTypeAFP       ));
+  rb_const_set(protocols, rb_intern("Telnet"), INT2NUM(kSecProtocolTypeTelnet    ));
+  rb_const_set(protocols, rb_intern("SSH"), INT2NUM(kSecProtocolTypeSSH       ));
+  rb_const_set(protocols, rb_intern("FTPS"), INT2NUM(kSecProtocolTypeFTPS      ));
+  rb_const_set(protocols, rb_intern("HTTPS"), INT2NUM(kSecProtocolTypeHTTPS     ));
+  rb_const_set(protocols, rb_intern("HTTPProxy"), INT2NUM(kSecProtocolTypeHTTPProxy ));
+  rb_const_set(protocols, rb_intern("HTTPSProxy"), INT2NUM(kSecProtocolTypeHTTPSProxy));
+  rb_const_set(protocols, rb_intern("FTPProxy "), INT2NUM(kSecProtocolTypeFTPProxy  ));
+  rb_const_set(protocols, rb_intern("CIFS"), INT2NUM(kSecProtocolTypeCIFS      ));
+  rb_const_set(protocols, rb_intern("SMB"), INT2NUM(kSecProtocolTypeSMB       ));
+  rb_const_set(protocols, rb_intern("RTSP "), INT2NUM(kSecProtocolTypeRTSP      ));
+  rb_const_set(protocols, rb_intern("RTSPProxy"), INT2NUM(kSecProtocolTypeRTSPProxy ));
+  rb_const_set(protocols, rb_intern("DAAP"), INT2NUM(kSecProtocolTypeDAAP      ));
+  rb_const_set(protocols, rb_intern("EPPC"), INT2NUM(kSecProtocolTypeEPPC      ));
+  rb_const_set(protocols, rb_intern("IPP"), INT2NUM(kSecProtocolTypeIPP       ));
+  rb_const_set(protocols, rb_intern("NNTPS"), INT2NUM(kSecProtocolTypeNNTPS     ));
+  rb_const_set(protocols, rb_intern("LDAPS"), INT2NUM(kSecProtocolTypeLDAPS     ));
+  rb_const_set(protocols, rb_intern("TelnetS"), INT2NUM(kSecProtocolTypeTelnetS   ));
+  rb_const_set(protocols, rb_intern("IMAPS"), INT2NUM(kSecProtocolTypeIMAPS     ));
+  rb_const_set(protocols, rb_intern("IRCS"), INT2NUM(kSecProtocolTypeIRCS      ));
+  rb_const_set(protocols, rb_intern("POP3S"), INT2NUM(kSecProtocolTypePOP3S     ));
+  rb_const_set(protocols, rb_intern("CVSpserver"), INT2NUM(kSecProtocolTypeCVSpserver));
+  rb_const_set(protocols, rb_intern("SVN"), INT2NUM(kSecProtocolTypeSVN       ));
+  rb_const_set(protocols, rb_intern("ANY"), INT2NUM(kSecProtocolTypeAny       ));
+}
 void Init_keychain(){
   rb_cKeychain = rb_const_get(rb_cObject, rb_intern("Keychain"));
   rb_cKeychainError = rb_const_get(rb_cKeychain, rb_intern("Error"));
 
   build_keychain_sec_map();
+  build_protocols();
 
   rb_define_singleton_method(rb_cKeychain, "default", RUBY_METHOD_FUNC(rb_default_keychain), 0);
   rb_define_singleton_method(rb_cKeychain, "open", RUBY_METHOD_FUNC(rb_open_keychain), 1);
