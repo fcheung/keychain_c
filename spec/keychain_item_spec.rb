@@ -29,4 +29,10 @@ describe Keychain::Item do
       subject.account.should == 'some-account'
     end
   end
+
+  describe 'created_at' do
+    it 'should retrieve the item creation date' do
+      subject.created_at.should be_within(2).of(Time.now)
+    end
+  end
 end
