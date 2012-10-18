@@ -6,6 +6,7 @@ VALUE rb_cKeychain;
 VALUE rb_cKeychainError;
 VALUE rb_cKeychainItem;
 
+VALUE rb_cKeychainSecMap;
 static void CheckOSStatusOrRaise(OSStatus err){
   if(err != 0){
     CFStringRef description = SecCopyErrorMessageString(err, NULL);
@@ -38,6 +39,9 @@ static CFDataRef rb_create_cf_data(VALUE string){
 }
 
 static VALUE cfstring_to_rb_string(CFStringRef s){
+  if(CFStringGetTypeID() != CFGetTypeID(s)){
+    rb_raise(rb_eTypeError, "Non cfstring passed to cfstring_to_rb_string");
+  }
   const char * fastBuffer = CFStringGetCStringPtr(s, kCFStringEncodingUTF8);
   if(fastBuffer){
     return rb_enc_str_new(fastBuffer, strlen(fastBuffer), rb_utf8_encoding());
@@ -110,7 +114,7 @@ static void rb_add_value_to_cf_dictionary(CFMutableDictionaryRef dict, CFStringR
     case T_STRING:
       {
         CFStringRef stringValue = rb_create_cf_string(value);
-        CFDictionaryAddValue(dict,key,stringValue);
+        CFDictionarySetValue(dict,key,stringValue);
         CFRelease(stringValue);
       }
       break;
@@ -118,7 +122,7 @@ static void rb_add_value_to_cf_dictionary(CFMutableDictionaryRef dict, CFStringR
       {
         long value = FIX2LONG(value);
         CFNumberRef numberValue = CFNumberCreate(NULL,kCFNumberLongType,&value);
-        CFDictionaryAddValue(dict,key,numberValue);
+        CFDictionarySetValue(dict,key,numberValue);
         CFRelease(numberValue);
         break;
       }
@@ -223,17 +227,17 @@ static VALUE rb_keychain_add_generic_password(VALUE self, VALUE rb_service, VALU
   
   CFMutableDictionaryRef attributes = CFDictionaryCreateMutable(NULL, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
 
-  CFDictionaryAddValue(attributes, kSecReturnAttributes, kCFBooleanTrue);
-  CFDictionaryAddValue(attributes, kSecReturnRef, kCFBooleanTrue);
-  CFDictionaryAddValue(attributes, kSecClass, kSecClassGenericPassword);
+  CFDictionarySetValue(attributes, kSecReturnAttributes, kCFBooleanTrue);
+  CFDictionarySetValue(attributes, kSecReturnRef, kCFBooleanTrue);
+  CFDictionarySetValue(attributes, kSecClass, kSecClassGenericPassword);
 
-  CFDictionaryAddValue(attributes, kSecUseKeychain, keychain);
+  CFDictionarySetValue(attributes, kSecUseKeychain, keychain);
 
   rb_add_value_to_cf_dictionary(attributes, kSecAttrService, rb_service);
   rb_add_value_to_cf_dictionary(attributes, kSecAttrAccount, rb_account);
 
   CFDataRef passwordData= rb_create_cf_data(rb_password);
-  CFDictionaryAddValue(attributes, kSecValueData, passwordData);
+  CFDictionarySetValue(attributes, kSecValueData, passwordData);
   CFRelease(passwordData);
   
   CFDictionaryRef result;
@@ -247,85 +251,131 @@ static VALUE rb_keychain_add_generic_password(VALUE self, VALUE rb_service, VALU
 }
 
 
-static VALUE rb_search_keychain(int argc, VALUE *argv, VALUE self){
-  VALUE arrayOrKeychainsOrNil;
+static VALUE add_conditions_to_query(VALUE pair, VALUE cfdict, int argc, VALUE argv[]){
+
+  VALUE key = RARRAY_PTR(pair)[0];
+  VALUE value = RARRAY_PTR(pair)[1];
+
+  VALUE sec_key = rb_hash_aref(rb_cKeychainSecMap, key);
+  if(!NIL_P(sec_key)){
+    CFStringRef cf_key = rb_create_cf_string(sec_key);
+    rb_add_value_to_cf_dictionary((CFMutableDictionaryRef)cfdict, cf_key, value);
+    CFRelease(cf_key);
+  }
+  return Qnil;
+}
+
+static VALUE rb_keychain_find(int argc, VALUE *argv, VALUE self){
+
+  VALUE kind;
   VALUE attributes;
 
-  rb_scan_args(argc, argv, "01:", &arrayOrKeychainsOrNil, &attributes);
+  rb_scan_args(argc, argv, "1:", &kind, &attributes);
+
 
   CFMutableDictionaryRef query = CFDictionaryCreateMutable(NULL, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
-  CFArrayRef keychainsToSearch = NULL;
+
+  CFDictionarySetValue(query, kSecReturnAttributes, kCFBooleanTrue);
+  CFDictionarySetValue(query, kSecReturnRef, kCFBooleanTrue);
+  CFDictionarySetValue(query, kSecClass, kSecClassGenericPassword);
   
-  switch (TYPE(arrayOrKeychainsOrNil)) {
-    case T_NIL:
-      break;
-    case T_ARRAY:
-    { 
-      CFMutableArrayRef searchArray = CFArrayCreateMutable(NULL, 0, &kCFTypeArrayCallBacks);
-      for(int index=0; index < RARRAY_LEN(arrayOrKeychainsOrNil); index++){
+
+  if(rb_to_id(kind) == rb_intern("all")){
+    CFDictionarySetValue(query, kSecMatchLimit, kSecMatchLimitAll);
+  }
+
+  if(!NIL_P(attributes)){
+    Check_Type(attributes, T_HASH);
+    VALUE rb_keychains = rb_hash_aref(attributes, ID2SYM(rb_intern("keychains")));
+    if(!NIL_P(rb_keychains)){
+      Check_Type(rb_keychains, T_ARRAY);
+      CFMutableArrayRef searchArray = CFArrayCreateMutable(NULL, RARRAY_LEN(rb_keychains), &kCFTypeArrayCallBacks);
+      for(int index=0; index < RARRAY_LEN(rb_keychains); index++){
         SecKeychainRef keychain = NULL;
-        Data_Get_Struct(RARRAY_PTR(arrayOrKeychainsOrNil)[index], struct OpaqueSecKeychainRef, keychain);
+        Data_Get_Struct(RARRAY_PTR(rb_keychains)[index], struct OpaqueSecKeychainRef, keychain);
         CFArrayAppendValue(searchArray, keychain);
       }
-      keychainsToSearch = searchArray;
+      CFDictionarySetValue(query, kSecMatchSearchList,searchArray);
     }  
-      break;
-    default:
-      rb_raise(rb_eTypeError, "searchPath should be a keychain, array of keychains or NULL was %d",TYPE(arrayOrKeychainsOrNil));
-      break;
-  }
-  if(keychainsToSearch){
-    CFDictionaryAddValue(query, kSecMatchSearchList, keychainsToSearch);
-    CFRelease(keychainsToSearch);
-  }
 
-  CFDictionaryAddValue(query, kSecReturnAttributes, kCFBooleanTrue);
-  CFDictionaryAddValue(query, kSecReturnRef, kCFBooleanTrue);
-  CFDictionaryAddValue(query, kSecClass, kSecClassGenericPassword);
-
-  
-  if(attributes){
-    VALUE rb_service = rb_hash_aref(attributes, ID2SYM(rb_intern("service")));
-    if(RTEST(rb_service)){
-      CFStringRef service = rb_create_cf_string(rb_service);
-      CFDictionaryAddValue(query, kSecAttrService, service);
-      CFRelease(service);
+    VALUE limit = rb_hash_aref(attributes, ID2SYM(rb_intern("limit")));
+    if(!NIL_P(limit)){
+      Check_Type(limit, T_FIXNUM);
+      long c_limit = FIX2LONG(limit);
+      CFNumberRef cf_limit = CFNumberCreate(NULL, kCFNumberLongType, &c_limit);
+      CFDictionarySetValue(query, kSecMatchLimit, cf_limit);
     }
 
-    VALUE rb_account = rb_hash_aref(attributes, ID2SYM(rb_intern("account")));
-    if(RTEST(rb_account)){
-      CFStringRef account = rb_create_cf_string(rb_account);
-      CFDictionaryAddValue(query, kSecAttrAccount, account);
-      CFRelease(account);
+    VALUE conditions = rb_hash_aref(attributes, ID2SYM(rb_intern("conditions")));
+    
+    if(!NIL_P(conditions)){
+      Check_Type(conditions, T_HASH);
+      rb_block_call(conditions, rb_intern("each"), 0, NULL, RUBY_METHOD_FUNC(add_conditions_to_query), (VALUE)query);
     }
-
   }
 
   CFDictionaryRef result;
+
   OSStatus status = SecItemCopyMatching(query, (CFTypeRef*)&result);
   CFRelease(query);
 
-  if(status == errSecItemNotFound){
-    return Qnil;
-  }else{
+  VALUE rb_item = rb_ary_new2(0);
+
+  switch(status){
+    case errSecItemNotFound: 
+      break;
+    default:
     CheckOSStatusOrRaise(status);
+    if(CFArrayGetTypeID() == CFGetTypeID(result)){
+      CFArrayRef result_array = (CFArrayRef)result;
+      for(CFIndex i = 0; i < CFArrayGetCount(result_array); i++){
+        rb_ary_push(rb_item,rb_keychain_item_from_sec_dictionary(CFArrayGetValueAtIndex(result_array,i)));
+      }
+    }
+    else{
+      rb_ary_push(rb_item, rb_keychain_item_from_sec_dictionary(result));
+    }
+    CFRelease(result);
   }
 
-  VALUE rb_item = rb_keychain_item_from_sec_dictionary(result);
-  CFRelease(result);
-  return rb_item;
+  if(rb_to_id(kind) == rb_intern("first")){
+    return rb_ary_entry(rb_item,0);
+  }
+  else{
+    return rb_item;
+  }
 }
 
+void build_keychain_sec_map(void){
+  rb_cKeychainSecMap = rb_hash_new();
+  rb_hash_aset(rb_cKeychainSecMap, ID2SYM(rb_intern("created_at")), cfstring_to_rb_string(kSecAttrCreationDate));
+  rb_hash_aset(rb_cKeychainSecMap, ID2SYM(rb_intern("updated_at")), cfstring_to_rb_string(kSecAttrModificationDate));
+  rb_hash_aset(rb_cKeychainSecMap, ID2SYM(rb_intern("description")), cfstring_to_rb_string(kSecAttrDescription));
+  rb_hash_aset(rb_cKeychainSecMap, ID2SYM(rb_intern("comment")), cfstring_to_rb_string(kSecAttrComment));
+  rb_hash_aset(rb_cKeychainSecMap, ID2SYM(rb_intern("account")), cfstring_to_rb_string(kSecAttrAccount));
+  rb_hash_aset(rb_cKeychainSecMap, ID2SYM(rb_intern("service")), cfstring_to_rb_string(kSecAttrService));
+  rb_hash_aset(rb_cKeychainSecMap, ID2SYM(rb_intern("server")), cfstring_to_rb_string(kSecAttrServer));
+  rb_hash_aset(rb_cKeychainSecMap, ID2SYM(rb_intern("port")), cfstring_to_rb_string(kSecAttrPort));
+  rb_hash_aset(rb_cKeychainSecMap, ID2SYM(rb_intern("security_domain")), cfstring_to_rb_string(kSecAttrSecurityDomain));
+  rb_hash_aset(rb_cKeychainSecMap, ID2SYM(rb_intern("negative")), cfstring_to_rb_string(kSecAttrIsNegative));
+  rb_hash_aset(rb_cKeychainSecMap, ID2SYM(rb_intern("invisible")), cfstring_to_rb_string(kSecAttrIsInvisible));
+  rb_hash_aset(rb_cKeychainSecMap, ID2SYM(rb_intern("label")), cfstring_to_rb_string(kSecAttrLabel));
+  rb_hash_aset(rb_cKeychainSecMap, ID2SYM(rb_intern("path")), cfstring_to_rb_string(kSecAttrPath));
+  rb_hash_aset(rb_cKeychainSecMap, ID2SYM(rb_intern("protocol")), cfstring_to_rb_string(kSecAttrProtocol));
+  rb_const_set(rb_cKeychain, rb_intern("KEYCHAIN_MAP"), rb_cKeychainSecMap);
+}
 
 void Init_keychain(){
   rb_cKeychain = rb_const_get(rb_cObject, rb_intern("Keychain"));
   rb_cKeychainError = rb_const_get(rb_cKeychain, rb_intern("Error"));
 
+  build_keychain_sec_map();
+
   rb_define_singleton_method(rb_cKeychain, "default", RUBY_METHOD_FUNC(rb_default_keychain), 0);
   rb_define_singleton_method(rb_cKeychain, "open", RUBY_METHOD_FUNC(rb_open_keychain), 1);
   rb_define_singleton_method(rb_cKeychain, "new", RUBY_METHOD_FUNC(rb_new_keychain), -1);
 
-  rb_define_singleton_method(rb_cKeychain, "search", RUBY_METHOD_FUNC(rb_search_keychain), -1);
+  rb_define_singleton_method(rb_cKeychain, "find", RUBY_METHOD_FUNC(rb_keychain_find), -1);
 
   rb_define_method(rb_cKeychain, "delete", RUBY_METHOD_FUNC(rb_keychain_delete), 0);
 

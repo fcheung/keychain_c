@@ -10,7 +10,7 @@ describe Keychain::Item do
     @keychain.delete
   end
 
-  subject {@keychain.search :service => 'some-service'}
+  subject {@keychain.find :first, :service => 'some-service'}
 
   describe 'password' do
     it 'should retrieve the password' do
