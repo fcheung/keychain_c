@@ -22,6 +22,112 @@ static void CheckOSStatusOrRaise(OSStatus err){
     rb_exc_raise(exception);
   }
 }
+
+static CFStringRef rb_create_cf_string(VALUE string){
+  StringValue(string);
+  string = rb_str_export_to_enc(string, rb_utf8_encoding());
+  char * c_string= StringValueCStr(string);
+  return CFStringCreateWithCString(NULL, c_string, kCFStringEncodingUTF8);
+}
+
+static CFDataRef rb_create_cf_data(VALUE string){
+  StringValue(string);
+  string = rb_str_export_to_enc(string, rb_utf8_encoding());
+  char * c_string= StringValueCStr(string);
+  return CFDataCreate(NULL, (UInt8*)c_string, strlen(c_string));
+}
+
+static VALUE cfstring_to_rb_string(CFStringRef s){
+  const char * fastBuffer = CFStringGetCStringPtr(s, kCFStringEncodingUTF8);
+  if(fastBuffer){
+    return rb_enc_str_new(fastBuffer, strlen(fastBuffer), rb_utf8_encoding());
+  }else{
+    CFIndex bufferLength = CFStringGetMaximumSizeForEncoding(CFStringGetLength(s),kCFStringEncodingUTF8);
+    char * buffer = malloc(bufferLength);
+    CFIndex used = 0;
+    CFStringGetBytes(s,CFRangeMake(0, CFStringGetLength(s)), kCFStringEncodingUTF8, 0, false, (UInt8*)buffer, bufferLength, &used);
+    VALUE rb_string = rb_enc_str_new(buffer, used, rb_utf8_encoding());
+    free(buffer);
+    return rb_string;
+  }
+}
+
+
+
+
+static void cf_hash_to_rb_hash(const void *raw_key, const void * raw_value, void *ctx){
+  CFTypeRef value = (CFTypeRef)raw_value;
+  CFStringRef key = (CFStringRef)raw_key;
+
+  VALUE rubyValue = Qnil;
+  VALUE hash = (VALUE)ctx;
+
+  if(CFStringGetTypeID() == CFGetTypeID(value)){
+    rubyValue = cfstring_to_rb_string((CFStringRef)value);
+  }
+  else if(CFBooleanGetTypeID() == CFGetTypeID(value)){
+    Boolean booleanValue = CFBooleanGetValue(value);
+    rubyValue = booleanValue ? Qtrue : Qfalse;
+  }
+  else if(CFNumberGetTypeID() == CFGetTypeID(value)){
+    if(CFNumberIsFloatType(value))
+    {
+      double doubleValue;
+      CFNumberGetValue(value, kCFNumberDoubleType, &doubleValue);
+      rubyValue = rb_float_new(doubleValue);
+    }else{
+      long longValue;
+      CFNumberGetValue(value, kCFNumberLongType, &longValue);
+      rubyValue = LONG2NUM(longValue);
+    }
+  }
+  else if (CFDateGetTypeID() == CFGetTypeID(value)){
+    CFDateRef date = (CFDateRef) value;
+    CFAbsoluteTime abs_time = CFDateGetAbsoluteTime(date);
+    double secondsSinceUnixEpoch = abs_time + kCFAbsoluteTimeIntervalSince1970;
+    time_t seconds = (time_t)secondsSinceUnixEpoch;
+    long usec = (secondsSinceUnixEpoch - seconds) * 1000000;
+    rubyValue = rb_time_new((time_t)secondsSinceUnixEpoch, usec);
+  }
+
+  if(!NIL_P(rubyValue)){
+    rb_hash_aset(hash, cfstring_to_rb_string(key), rubyValue);
+  }
+}
+
+VALUE rb_keychain_item_from_sec_dictionary(CFDictionaryRef dict){
+  SecKeychainItemRef item = (SecKeychainItemRef) CFDictionaryGetValue(dict, kSecValueRef);
+  CFRetain(item);
+  VALUE rb_item = Data_Wrap_Struct(rb_cKeychainItem, NULL, CFRelease, item);
+  VALUE keychain_item_attributes = rb_hash_new();
+  CFDictionaryApplyFunction(dict, cf_hash_to_rb_hash, (void*)keychain_item_attributes);
+  rb_ivar_set(rb_item, rb_intern("@attributes"), keychain_item_attributes);
+  return rb_item;
+}
+
+static void rb_add_value_to_cf_dictionary(CFMutableDictionaryRef dict, CFStringRef key, VALUE value){
+  switch(TYPE(value)){
+    case T_STRING:
+      {
+        CFStringRef stringValue = rb_create_cf_string(value);
+        CFDictionaryAddValue(dict,key,stringValue);
+        CFRelease(stringValue);
+      }
+      break;
+    case T_FIXNUM:
+      {
+        long value = FIX2LONG(value);
+        CFNumberRef numberValue = CFNumberCreate(NULL,kCFNumberLongType,&value);
+        CFDictionaryAddValue(dict,key,numberValue);
+        CFRelease(numberValue);
+        break;
+      }
+    default:
+      rb_raise(rb_eTypeError, "Can't convert value to cftype: %s", rb_obj_classname(value));
+  }
+}
+
+
 static VALUE KeychainFromSecKeychainRef(SecKeychainRef keychainRef){
   VALUE result = Data_Wrap_Struct(rb_cKeychain, NULL, CFRelease, keychainRef);
   return result;
@@ -92,61 +198,6 @@ static VALUE rb_keychain_item_delete(VALUE self){
   return self;
 }
 
-static VALUE cfstring_to_rb_string(CFStringRef s){
-  const char * fastBuffer = CFStringGetCStringPtr(s, kCFStringEncodingUTF8);
-  if(fastBuffer){
-    return rb_enc_str_new(fastBuffer, strlen(fastBuffer), rb_utf8_encoding());
-  }else{
-    CFIndex bufferLength = CFStringGetMaximumSizeForEncoding(CFStringGetLength(s),kCFStringEncodingUTF8);
-    char * buffer = malloc(bufferLength);
-    CFIndex used = 0;
-    CFStringGetBytes(s,CFRangeMake(0, CFStringGetLength(s)), kCFStringEncodingUTF8, 0, false, (UInt8*)buffer, bufferLength, &used);
-    VALUE rb_string = rb_enc_str_new(buffer, used, rb_utf8_encoding());
-    free(buffer);
-    return rb_string;
-  }
-}
-
-
-static void cf_hash_to_rb_hash(const void *raw_key, const void * raw_value, void *ctx){
-  CFTypeRef value = (CFTypeRef)raw_value;
-  CFStringRef key = (CFStringRef)raw_key;
-
-  VALUE rubyValue = Qnil;
-  VALUE hash = (VALUE)ctx;
-
-  if(CFStringGetTypeID() == CFGetTypeID(value)){
-    rubyValue = cfstring_to_rb_string((CFStringRef)value);
-  }
-  else if(CFBooleanGetTypeID() == CFGetTypeID(value)){
-    Boolean booleanValue = CFBooleanGetValue(value);
-    rubyValue = booleanValue ? Qtrue : Qfalse;
-  }
-  else if(CFNumberGetTypeID() == CFGetTypeID(value)){
-    if(CFNumberIsFloatType(value))
-    {
-      double doubleValue;
-      CFNumberGetValue(value, kCFNumberDoubleType, &doubleValue);
-      rubyValue = rb_float_new(doubleValue);
-    }else{
-      long longValue;
-      CFNumberGetValue(value, kCFNumberLongType, &longValue);
-      rubyValue = LONG2NUM(longValue);
-    }
-  }
-  else if (CFDateGetTypeID() == CFGetTypeID(value)){
-    CFDateRef date = (CFDateRef) value;
-    CFAbsoluteTime abs_time = CFDateGetAbsoluteTime(date);
-    double secondsSinceUnixEpoch = abs_time + kCFAbsoluteTimeIntervalSince1970;
-    time_t seconds = (time_t)secondsSinceUnixEpoch;
-    long usec = (secondsSinceUnixEpoch - seconds) * 1000000;
-    rubyValue = rb_time_new((time_t)secondsSinceUnixEpoch, usec);
-  }
-
-  if(!NIL_P(rubyValue)){
-    rb_hash_aset(hash, cfstring_to_rb_string(key), rubyValue);
-  }
-}
 
 static VALUE rb_keychain_item_copy_password(VALUE self){
   void *data;
@@ -169,27 +220,30 @@ static VALUE rb_keychain_add_generic_password(VALUE self, VALUE rb_service, VALU
   SecKeychainRef keychain=NULL;
   Data_Get_Struct(self, struct OpaqueSecKeychainRef, keychain);
 
-  VALUE utf_service = rb_str_conv_enc(rb_service, (rb_encoding*)rb_obj_encoding(rb_service), rb_utf8_encoding()); 
-  VALUE utf_account = rb_str_conv_enc(rb_account, (rb_encoding*)rb_obj_encoding(rb_account), rb_utf8_encoding()); 
-  VALUE utf_password = rb_str_conv_enc(rb_password, (rb_encoding*)rb_obj_encoding(rb_password), rb_utf8_encoding()); 
+  
+  CFMutableDictionaryRef attributes = CFDictionaryCreateMutable(NULL, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
 
-  OSStatus result = SecKeychainAddGenericPassword(keychain,
-                        (UInt32)RSTRING_LEN(utf_service),
-                        RSTRING_PTR(utf_service),
-                        (UInt32)RSTRING_LEN(utf_account),
-                        RSTRING_PTR(utf_account),
-                        (UInt32)RSTRING_LEN(utf_password),
-                        RSTRING_PTR(utf_password),
-                        &keychainItem);
+  CFDictionaryAddValue(attributes, kSecReturnAttributes, kCFBooleanTrue);
+  CFDictionaryAddValue(attributes, kSecReturnRef, kCFBooleanTrue);
+  CFDictionaryAddValue(attributes, kSecClass, kSecClassGenericPassword);
 
-  CheckOSStatusOrRaise(result);
-  return Data_Wrap_Struct(rb_cKeychainItem, NULL, CFRelease, keychainItem);
-}
+  CFDictionaryAddValue(attributes, kSecUseKeychain, keychain);
 
-static CFStringRef rb_create_cf_string(VALUE string){
-  string = rb_str_export_to_enc(string, rb_utf8_encoding());
-  char * c_string= StringValueCStr(string);
-  return CFStringCreateWithCString(NULL, c_string, kCFStringEncodingUTF8);
+  rb_add_value_to_cf_dictionary(attributes, kSecAttrService, rb_service);
+  rb_add_value_to_cf_dictionary(attributes, kSecAttrAccount, rb_account);
+
+  CFDataRef passwordData= rb_create_cf_data(rb_password);
+  CFDictionaryAddValue(attributes, kSecValueData, passwordData);
+  CFRelease(passwordData);
+  
+  CFDictionaryRef result;
+  OSStatus status = SecItemAdd(attributes, (CFTypeRef*)&result);
+  CFRelease(attributes);
+  CheckOSStatusOrRaise(status);
+
+  VALUE rb_keychain_item = rb_keychain_item_from_sec_dictionary(result);
+  CFRelease(result);
+  return rb_keychain_item;
 }
 
 
@@ -257,16 +311,11 @@ static VALUE rb_search_keychain(int argc, VALUE *argv, VALUE self){
     CheckOSStatusOrRaise(status);
   }
 
-  SecKeychainItemRef item = (SecKeychainItemRef) CFDictionaryGetValue(result, kSecValueRef);
-
-  CFRetain(item);
-  VALUE rb_item = Data_Wrap_Struct(rb_cKeychainItem, NULL, CFRelease, item);
-  VALUE keychain_item_attributes = rb_hash_new();
-  CFDictionaryApplyFunction(result, cf_hash_to_rb_hash, (void*)keychain_item_attributes);
+  VALUE rb_item = rb_keychain_item_from_sec_dictionary(result);
   CFRelease(result);
-  rb_ivar_set(rb_item, rb_intern("@attributes"), keychain_item_attributes);
   return rb_item;
 }
+
 
 void Init_keychain(){
   rb_cKeychain = rb_const_get(rb_cObject, rb_intern("Keychain"));
