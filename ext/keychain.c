@@ -33,9 +33,13 @@ static CFStringRef rb_create_cf_string(VALUE string){
 
 static CFDataRef rb_create_cf_data(VALUE string){
   StringValue(string);
-  string = rb_str_export_to_enc(string, rb_utf8_encoding());
-  char * c_string= StringValueCStr(string);
-  return CFDataCreate(NULL, (UInt8*)c_string, strlen(c_string));
+  if(ENCODING_IS_ASCII8BIT(rb_obj_encoding(string))){
+    return CFDataCreate(NULL, (UInt8*)RSTRING_PTR(string), RSTRING_LEN(string));
+  }
+  else{
+    string = rb_str_export_to_enc(string, rb_utf8_encoding());
+    return CFDataCreate(NULL, (UInt8*)RSTRING_PTR(string), RSTRING_LEN(string));
+  }
 }
 
 static VALUE cfstring_to_rb_string(CFStringRef s){
@@ -68,6 +72,10 @@ static void cf_hash_to_rb_hash(const void *raw_key, const void * raw_value, void
 
   if(CFStringGetTypeID() == CFGetTypeID(value)){
     rubyValue = cfstring_to_rb_string((CFStringRef)value);
+  }
+  else if(CFDataGetTypeID() == CFGetTypeID(value)){
+    CFDataRef data = (CFDataRef)value;
+    rubyValue = rb_enc_str_new((const char*)CFDataGetBytePtr(data),CFDataGetLength(data), rb_ascii8bit_encoding());
   }
   else if(CFBooleanGetTypeID() == CFGetTypeID(value)){
     Boolean booleanValue = CFBooleanGetValue(value);
@@ -113,9 +121,16 @@ static void rb_add_value_to_cf_dictionary(CFMutableDictionaryRef dict, CFStringR
   switch(TYPE(value)){
     case T_STRING:
       {
-        CFStringRef stringValue = rb_create_cf_string(value);
-        CFDictionarySetValue(dict,key,stringValue);
-        CFRelease(stringValue);
+        if(!CFStringCompare(key, kSecValueData,0) || !CFStringCompare(key, kSecAttrGeneric,0)){
+          CFDataRef dataValue = rb_create_cf_data(value);
+          CFDictionarySetValue(dict,key,dataValue);
+          CFRelease(dataValue);
+        }
+        else{
+          CFStringRef stringValue = rb_create_cf_string(value);
+          CFDictionarySetValue(dict,key,stringValue);
+          CFRelease(stringValue);
+        }
       }
       break;
     case T_BIGNUM:
@@ -210,6 +225,7 @@ static VALUE rb_keychain_item_copy_password(VALUE self){
   UInt32 dataLength;
   Data_Get_Struct(self, struct OpaqueSecKeychainItemRef, keychainItem);
 
+
   OSStatus result = SecKeychainItemCopyAttributesAndData(keychainItem, NULL , NULL, NULL, &dataLength, &data);
 
   CheckOSStatusOrRaise(result);
@@ -217,38 +233,6 @@ static VALUE rb_keychain_item_copy_password(VALUE self){
   VALUE rb_data = rb_enc_str_new(data, dataLength, rb_ascii8bit_encoding());
   SecKeychainItemFreeAttributesAndData(NULL,data);
   return rb_data;
-}
-
-
-static VALUE rb_keychain_add_generic_password(VALUE self, VALUE rb_service, VALUE rb_account, VALUE rb_password){
-  SecKeychainItemRef keychainItem = NULL;
-  SecKeychainRef keychain=NULL;
-  Data_Get_Struct(self, struct OpaqueSecKeychainRef, keychain);
-
-  
-  CFMutableDictionaryRef attributes = CFDictionaryCreateMutable(NULL, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
-
-  CFDictionarySetValue(attributes, kSecReturnAttributes, kCFBooleanTrue);
-  CFDictionarySetValue(attributes, kSecReturnRef, kCFBooleanTrue);
-  CFDictionarySetValue(attributes, kSecClass, kSecClassGenericPassword);
-
-  CFDictionarySetValue(attributes, kSecUseKeychain, keychain);
-
-  rb_add_value_to_cf_dictionary(attributes, kSecAttrService, rb_service);
-  rb_add_value_to_cf_dictionary(attributes, kSecAttrAccount, rb_account);
-
-  CFDataRef passwordData= rb_create_cf_data(rb_password);
-  CFDictionarySetValue(attributes, kSecValueData, passwordData);
-  CFRelease(passwordData);
-  
-  CFDictionaryRef result;
-  OSStatus status = SecItemAdd(attributes, (CFTypeRef*)&result);
-  CFRelease(attributes);
-  CheckOSStatusOrRaise(status);
-
-  VALUE rb_keychain_item = rb_keychain_item_from_sec_dictionary(result);
-  CFRelease(result);
-  return rb_keychain_item;
 }
 
 
@@ -266,24 +250,73 @@ static VALUE add_conditions_to_query(VALUE pair, VALUE cfdict, int argc, VALUE a
   return Qnil;
 }
 
+static VALUE rb_keychain_add_password(VALUE self, VALUE kind, VALUE options){
+  SecKeychainItemRef keychainItem = NULL;
+  SecKeychainRef keychain=NULL;
+  Data_Get_Struct(self, struct OpaqueSecKeychainRef, keychain);
+
+  Check_Type(options, T_HASH);
+
+  CFTypeRef klass = NULL;
+  if(rb_to_id(kind) == rb_intern("generic")){
+    klass =  kSecClassGenericPassword;
+  }
+  else if(rb_to_id(kind) == rb_intern("internet")){
+    klass = kSecClassInternetPassword;
+  }else{
+    rb_raise(rb_eArgError, "Invalid kind :%s",rb_id2name(SYM2ID(kind)));
+  }
+
+  CFMutableDictionaryRef attributes = CFDictionaryCreateMutable(NULL, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+
+  CFDictionarySetValue(attributes, kSecReturnAttributes, kCFBooleanTrue);
+  CFDictionarySetValue(attributes, kSecReturnRef, kCFBooleanTrue);
+  CFDictionarySetValue(attributes, kSecClass, klass);
+  CFDictionarySetValue(attributes, kSecUseKeychain, keychain);
+
+  rb_block_call(options, rb_intern("each"), 0, NULL, RUBY_METHOD_FUNC(add_conditions_to_query), (VALUE)attributes);
+  
+  CFDictionaryRef result;
+
+  OSStatus status = SecItemAdd(attributes, (CFTypeRef*)&result);
+  CFRelease(attributes);
+  CheckOSStatusOrRaise(status);
+
+  VALUE rb_keychain_item = rb_keychain_item_from_sec_dictionary(result);
+  CFRelease(result);
+  return rb_keychain_item;
+}
+
+
 static VALUE rb_keychain_find(int argc, VALUE *argv, VALUE self){
 
   VALUE kind;
   VALUE attributes;
-
-  rb_scan_args(argc, argv, "1:", &kind, &attributes);
+  VALUE first_or_all;
+  rb_scan_args(argc, argv, "2:", &first_or_all, &kind, &attributes);
 
 
   CFMutableDictionaryRef query = CFDictionaryCreateMutable(NULL, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
 
   CFDictionarySetValue(query, kSecReturnAttributes, kCFBooleanTrue);
   CFDictionarySetValue(query, kSecReturnRef, kCFBooleanTrue);
-  CFDictionarySetValue(query, kSecClass, kSecClassGenericPassword);
   
 
-  if(rb_to_id(kind) == rb_intern("all")){
+  if(rb_to_id(first_or_all) == rb_intern("all")){
     CFDictionarySetValue(query, kSecMatchLimit, kSecMatchLimitAll);
   }
+
+  if(rb_to_id(kind) == rb_intern("generic")){
+    CFDictionarySetValue(query, kSecClass, kSecClassGenericPassword);
+  }
+  else if(rb_to_id(kind) == rb_intern("internet")){
+    CFDictionarySetValue(query, kSecClass, kSecClassInternetPassword);
+  }
+  else{
+    CFRelease(query);
+    rb_raise(rb_eArgError, "Invalid kind: %s", rb_id2name(ID2SYM(kind)));
+  }
+
 
   if(!NIL_P(attributes)){
     Check_Type(attributes, T_HASH);
@@ -341,7 +374,7 @@ static VALUE rb_keychain_find(int argc, VALUE *argv, VALUE self){
     CFRelease(result);
   }
 
-  if(rb_to_id(kind) == rb_intern("first")){
+  if(rb_to_id(first_or_all) == rb_intern("first")){
     return rb_ary_entry(rb_item,0);
   }
   else{
@@ -365,6 +398,9 @@ void build_keychain_sec_map(void){
   rb_hash_aset(rb_cKeychainSecMap, ID2SYM(rb_intern("label")), cfstring_to_rb_string(kSecAttrLabel));
   rb_hash_aset(rb_cKeychainSecMap, ID2SYM(rb_intern("path")), cfstring_to_rb_string(kSecAttrPath));
   rb_hash_aset(rb_cKeychainSecMap, ID2SYM(rb_intern("protocol")), cfstring_to_rb_string(kSecAttrProtocol));
+  rb_hash_aset(rb_cKeychainSecMap, ID2SYM(rb_intern("password")), cfstring_to_rb_string(kSecValueData));
+  rb_hash_aset(rb_cKeychainSecMap, ID2SYM(rb_intern("kind")), cfstring_to_rb_string(kSecClass));
+
   rb_const_set(rb_cKeychain, rb_intern("KEYCHAIN_MAP"), rb_cKeychainSecMap);
 }
 
@@ -423,13 +459,11 @@ void Init_keychain(){
   rb_define_method(rb_cKeychain, "delete", RUBY_METHOD_FUNC(rb_keychain_delete), 0);
 
   rb_define_method(rb_cKeychain, "path", RUBY_METHOD_FUNC(rb_keychain_path), 0);
-  rb_define_method(rb_cKeychain, "add_generic_password", RUBY_METHOD_FUNC(rb_keychain_add_generic_password), 3);
+  rb_define_method(rb_cKeychain, "add_password", RUBY_METHOD_FUNC(rb_keychain_add_password), 2);
 
   rb_cKeychainItem = rb_define_class_under(rb_cKeychain, "Item", rb_cObject);
 
   rb_define_method(rb_cKeychainItem, "delete", RUBY_METHOD_FUNC(rb_keychain_item_delete), 0);
   rb_define_method(rb_cKeychainItem, "password", RUBY_METHOD_FUNC(rb_keychain_item_copy_password), 0);
-
-
 
 }

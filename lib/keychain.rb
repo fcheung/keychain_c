@@ -1,4 +1,20 @@
 class Keychain
+  class Proxy
+    def initialize(kind, attributes={})
+      @stored_attributes = attributes
+      @kind = kind
+    end
+
+    def find(first_or_all, attributes = {})
+      Keychain.find(first_or_all, @kind, @stored_attributes.merge(attributes))
+    end
+
+    def add options={}
+      keychain = (@stored_attributes[:keychains] && @stored_attributes[:keychains].first) || Keychain.default
+      keychain.add_password @kind, options
+    end
+  end
+
   class Error < StandardError
     attr_accessor :code
     def initialize(message, code)
@@ -12,8 +28,20 @@ class Keychain
     "<Keychain 0x#{self.object_id.to_s(16)}: #{path}>"
   end
 
-  def find(first_or_all, attributes={})
-    self.class.find(first_or_all, attributes.merge(:keychains => [self]))
+  def generic_passwords
+    Proxy.new(:generic,:keychains => [self])
+  end
+
+  def intenet_passwords
+    Proxy.new(:internet,:keychains => [self])
+  end
+
+  def self.generic_passwords
+    Proxy.new(:generic)
+  end
+
+  def self.intenet_passwords
+    Proxy.new(:internet)
   end
 
 end
@@ -23,11 +51,13 @@ require 'keychain/keychain'
 class Keychain::Item
 
   Keychain::KEYCHAIN_MAP.each do |ruby_name, attr_name|
-    define_method ruby_name do
-      @attributes[attr_name]
-    end
-    define_method ruby_name.to_s+'=' do |value|
-      @attributes[attr_name] = value
+    unless method_defined?(ruby_name)
+      define_method ruby_name do
+        @attributes[attr_name]
+      end
+      define_method ruby_name.to_s+'=' do |value|
+        @attributes[attr_name] = value
+      end
     end
   end
 end

@@ -3,14 +3,14 @@ require 'spec_helper'
 describe Keychain::Item do 
   before(:each) do
     @keychain = Keychain.new(File.join(Dir.tmpdir, "keychain_spec_#{Time.now.to_i}_#{Time.now.usec}_#{rand(1000)}.keychain"), 'pass')
-    @keychain.add_generic_password 'some-service', 'some-account', 'some-password'
+    @keychain.generic_passwords.add :service => 'some-service', :account => 'some-account', :password => 'some-password'
   end
 
   after(:each) do
     @keychain.delete
   end
 
-  subject {@keychain.find :first, :service => 'some-service'}
+  subject {@keychain.generic_passwords.find :first, :conditions => {:service => 'some-service'}}
 
   describe 'password' do
     it 'should retrieve the password' do
