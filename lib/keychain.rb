@@ -32,7 +32,7 @@ class Keychain
     Proxy.new(:generic,:keychains => [self])
   end
 
-  def intenet_passwords
+  def internet_passwords
     Proxy.new(:internet,:keychains => [self])
   end
 
@@ -40,7 +40,7 @@ class Keychain
     Proxy.new(:generic)
   end
 
-  def self.intenet_passwords
+  def self.internet_passwords
     Proxy.new(:internet)
   end
 
