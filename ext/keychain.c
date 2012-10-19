@@ -297,6 +297,7 @@ static VALUE rb_keychain_find(int argc, VALUE *argv, VALUE self){
         CFArrayAppendValue(searchArray, keychain);
       }
       CFDictionarySetValue(query, kSecMatchSearchList,searchArray);
+      CFRelease(searchArray);
     }  
 
     VALUE limit = rb_hash_aref(attributes, ID2SYM(rb_intern("limit")));
@@ -305,6 +306,7 @@ static VALUE rb_keychain_find(int argc, VALUE *argv, VALUE self){
       long c_limit = FIX2LONG(limit);
       CFNumberRef cf_limit = CFNumberCreate(NULL, kCFNumberLongType, &c_limit);
       CFDictionarySetValue(query, kSecMatchLimit, cf_limit);
+      CFRelease(cf_limit);
     }
 
     VALUE conditions = rb_hash_aref(attributes, ID2SYM(rb_intern("conditions")));
