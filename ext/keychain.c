@@ -442,6 +442,51 @@ static void build_protocols(void){
   rb_const_set(protocols, rb_intern("SVN"), INT2NUM(kSecProtocolTypeSVN       ));
   rb_const_set(protocols, rb_intern("ANY"), INT2NUM(kSecProtocolTypeAny       ));
 }
+
+
+static void rb_get_keychain_settings(VALUE self, SecKeychainSettings *settings){
+  SecKeychainRef keychain=NULL;
+  Data_Get_Struct(self, struct OpaqueSecKeychainRef, keychain);
+  settings->version = SEC_KEYCHAIN_SETTINGS_VERS1;
+  OSStatus result = SecKeychainCopySettings(keychain, settings);
+  CheckOSStatusOrRaise(result);
+}
+
+static void rb_set_keychain_settings(VALUE self, SecKeychainSettings *settings){
+  SecKeychainRef keychain=NULL;
+  Data_Get_Struct(self, struct OpaqueSecKeychainRef, keychain);
+  OSStatus result = SecKeychainSetSettings(keychain, settings);
+  CheckOSStatusOrRaise(result);
+}
+
+static VALUE rb_keychain_settings_lock_on_sleep(VALUE self){
+  SecKeychainSettings settings;
+  rb_get_keychain_settings(self, &settings);
+  return settings.lockOnSleep ? Qtrue : Qfalse;
+}
+
+static VALUE rb_keychain_settings_set_lock_on_sleep(VALUE self, VALUE newValue){
+  SecKeychainSettings settings;
+  rb_get_keychain_settings(self, &settings);
+  settings.lockOnSleep = RTEST(newValue);
+  rb_set_keychain_settings(self, &settings);
+  return newValue;
+}
+
+static VALUE rb_keychain_settings_lock_interval(VALUE self){
+  SecKeychainSettings settings;
+  rb_get_keychain_settings(self, &settings);
+  return UINT2NUM(settings.lockInterval);
+}
+
+static VALUE rb_keychain_settings_set_lock_interval(VALUE self, VALUE newValue){
+  SecKeychainSettings settings;
+  rb_get_keychain_settings(self, &settings);
+  settings.lockInterval = NUM2UINT(newValue);
+  rb_set_keychain_settings(self, &settings);
+  return newValue;
+}
+
 void Init_keychain(){
   rb_cKeychain = rb_const_get(rb_cObject, rb_intern("Keychain"));
   rb_eKeychainError = rb_const_get(rb_cKeychain, rb_intern("Error"));
@@ -457,10 +502,15 @@ void Init_keychain(){
   rb_define_singleton_method(rb_cKeychain, "find", RUBY_METHOD_FUNC(rb_keychain_find), -1);
 
   rb_define_method(rb_cKeychain, "delete", RUBY_METHOD_FUNC(rb_keychain_delete), 0);
-
   rb_define_method(rb_cKeychain, "path", RUBY_METHOD_FUNC(rb_keychain_path), 0);
   rb_define_method(rb_cKeychain, "add_password", RUBY_METHOD_FUNC(rb_keychain_add_password), 2);
 
+  rb_define_method(rb_cKeychain, "lock_on_sleep", RUBY_METHOD_FUNC(rb_keychain_settings_lock_on_sleep), 0);
+  rb_define_method(rb_cKeychain, "lock_on_sleep=", RUBY_METHOD_FUNC(rb_keychain_settings_set_lock_on_sleep), 1);
+  
+  rb_define_method(rb_cKeychain, "lock_interval", RUBY_METHOD_FUNC(rb_keychain_settings_lock_interval), 0);
+  rb_define_method(rb_cKeychain, "lock_interval=", RUBY_METHOD_FUNC(rb_keychain_settings_set_lock_interval), 1);
+//we don't bother with use_lock_interval - the underlying api appears to ignore it ( see http://www.opensource.apple.com/source/libsecurity_keychain/libsecurity_keychain-55050.9/lib/SecKeychain.cpp )
   rb_cKeychainItem = rb_define_class_under(rb_cKeychain, "Item", rb_cObject);
 
   rb_define_method(rb_cKeychainItem, "delete", RUBY_METHOD_FUNC(rb_keychain_item_delete), 0);

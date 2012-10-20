@@ -26,7 +26,28 @@ describe Keychain do
     end
   end
 
-  
+  describe 'settings' do
+    before(:all) do
+      @keychain = Keychain.new(File.join(Dir.tmpdir, "keychain_spec_#{Time.now.to_i}_#{Time.now.usec}_#{rand(1000)}.keychain"), 'pass')
+    end
+
+    it 'should read/write lock_on_sleep' do
+      @keychain.lock_on_sleep = true
+      @keychain.lock_on_sleep.should == true
+      @keychain.lock_on_sleep = false
+      @keychain.lock_on_sleep.should == false
+    end
+
+    it 'should read/write lock_interval' do
+      @keychain.lock_interval = 12345
+      @keychain.lock_interval.should == 12345
+    end
+
+    after(:all) do
+      @keychain.delete
+    end
+  end
+
   
   shared_examples_for 'item collection' do
 
