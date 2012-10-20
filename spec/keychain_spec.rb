@@ -57,6 +57,16 @@ describe Keychain do
         item = @keychain_1.send(subject).find(:first, :conditions => search_for_created_arguments)
         item.password.should == 'some-password'
       end
+
+      context 'when a duplicate item exists' do
+        before(:each) do
+          @keychain_1.send(subject).add(create_arguments)
+        end
+
+        it 'should raise Keychain::DuplicateItemError' do
+          expect {@keychain_1.send(subject).add(create_arguments)}.to raise_error(Keychain::DuplicateItemError)
+        end
+      end
     end
 
     describe('find :all') do

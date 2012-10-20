@@ -21,8 +21,9 @@ class Keychain
       self.code = code
       super message
     end
-
   end
+  class DuplicateItemError < Error; end
+
 
   def inspect
     "<Keychain 0x#{self.object_id.to_s(16)}: #{path}>"

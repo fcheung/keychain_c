@@ -3,7 +3,8 @@
 #include <Security/Security.h>
 
 VALUE rb_cKeychain;
-VALUE rb_cKeychainError;
+VALUE rb_eKeychainError;
+VALUE rb_eKeychainDuplicateItemError;
 VALUE rb_cKeychainItem;
 
 VALUE rb_cKeychainSecMap;
@@ -18,7 +19,15 @@ static void CheckOSStatusOrRaise(OSStatus err){
 
     VALUE exceptionString = rb_enc_str_new(buffer, strlen(buffer), rb_utf8_encoding());
     free(buffer);
-    VALUE exception = rb_obj_alloc(rb_cKeychainError);
+    VALUE exception = Qnil;
+
+    switch(err){
+      case errSecDuplicateItem:
+        exception = rb_obj_alloc(rb_eKeychainDuplicateItemError);
+        break;
+      default:
+        exception = rb_obj_alloc(rb_eKeychainError);
+    }
     rb_funcall(exception, rb_intern("initialize"), 2,exceptionString, INT2FIX(err));
     rb_exc_raise(exception);
   }
@@ -445,7 +454,8 @@ void build_protocols(void){
 }
 void Init_keychain(){
   rb_cKeychain = rb_const_get(rb_cObject, rb_intern("Keychain"));
-  rb_cKeychainError = rb_const_get(rb_cKeychain, rb_intern("Error"));
+  rb_eKeychainError = rb_const_get(rb_cKeychain, rb_intern("Error"));
+  rb_eKeychainDuplicateItemError = rb_const_get(rb_cKeychain, rb_intern("DuplicateItemError"));
 
   build_keychain_sec_map();
   build_protocols();
