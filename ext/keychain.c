@@ -145,8 +145,8 @@ static void rb_add_value_to_cf_dictionary(CFMutableDictionaryRef dict, CFStringR
     case T_BIGNUM:
     case T_FIXNUM:
       {
-        long long value = NUM2LL(value);
-        CFNumberRef numberValue = CFNumberCreate(NULL,kCFNumberLongLongType,&value);
+        long long longLongValue = NUM2LL(value);
+        CFNumberRef numberValue = CFNumberCreate(NULL,kCFNumberLongLongType,&longLongValue);
         CFDictionarySetValue(dict,key,numberValue);
         CFRelease(numberValue);
         break;
