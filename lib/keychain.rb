@@ -30,19 +30,19 @@ class Keychain
   end
 
   def generic_passwords
-    Proxy.new(:generic,:keychains => [self])
+    Proxy.new(Item::Classes::GENERIC,:keychains => [self])
   end
 
   def internet_passwords
-    Proxy.new(:internet,:keychains => [self])
+    Proxy.new(Item::Classes::INTERNET,:keychains => [self])
   end
 
   def self.generic_passwords
-    Proxy.new(:generic)
+    Proxy.new(Item::Classes::GENERIC)
   end
 
   def self.internet_passwords
-    Proxy.new(:internet)
+    Proxy.new(Item::Classes::INTERNET)
   end
 
 end

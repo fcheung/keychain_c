@@ -265,22 +265,13 @@ static VALUE rb_keychain_add_password(VALUE self, VALUE kind, VALUE options){
   Data_Get_Struct(self, struct OpaqueSecKeychainRef, keychain);
 
   Check_Type(options, T_HASH);
+  Check_Type(kind, T_STRING);
 
-  CFTypeRef klass = NULL;
-  if(rb_to_id(kind) == rb_intern("generic")){
-    klass =  kSecClassGenericPassword;
-  }
-  else if(rb_to_id(kind) == rb_intern("internet")){
-    klass = kSecClassInternetPassword;
-  }else{
-    rb_raise(rb_eArgError, "Invalid kind :%s",rb_id2name(SYM2ID(kind)));
-  }
 
   CFMutableDictionaryRef attributes = CFDictionaryCreateMutable(NULL, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
-
+  rb_add_value_to_cf_dictionary(attributes, kSecClass, kind);
   CFDictionarySetValue(attributes, kSecReturnAttributes, kCFBooleanTrue);
   CFDictionarySetValue(attributes, kSecReturnRef, kCFBooleanTrue);
-  CFDictionarySetValue(attributes, kSecClass, klass);
   CFDictionarySetValue(attributes, kSecUseKeychain, keychain);
 
   rb_block_call(options, rb_intern("each"), 0, NULL, RUBY_METHOD_FUNC(add_conditions_to_query), (VALUE)attributes);
@@ -304,7 +295,9 @@ static VALUE rb_keychain_find(int argc, VALUE *argv, VALUE self){
   VALUE first_or_all;
   rb_scan_args(argc, argv, "2:", &first_or_all, &kind, &attributes);
 
-
+  Check_Type(first_or_all, T_SYMBOL);
+  Check_Type(kind, T_STRING);
+  
   CFMutableDictionaryRef query = CFDictionaryCreateMutable(NULL, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
 
   CFDictionarySetValue(query, kSecReturnAttributes, kCFBooleanTrue);
@@ -315,16 +308,7 @@ static VALUE rb_keychain_find(int argc, VALUE *argv, VALUE self){
     CFDictionarySetValue(query, kSecMatchLimit, kSecMatchLimitAll);
   }
 
-  if(rb_to_id(kind) == rb_intern("generic")){
-    CFDictionarySetValue(query, kSecClass, kSecClassGenericPassword);
-  }
-  else if(rb_to_id(kind) == rb_intern("internet")){
-    CFDictionarySetValue(query, kSecClass, kSecClassInternetPassword);
-  }
-  else{
-    CFRelease(query);
-    rb_raise(rb_eArgError, "Invalid kind: %s", rb_id2name(ID2SYM(kind)));
-  }
+  rb_add_value_to_cf_dictionary(query, kSecClass, kind);
 
 
   if(!NIL_P(attributes)){
@@ -391,7 +375,7 @@ static VALUE rb_keychain_find(int argc, VALUE *argv, VALUE self){
   }
 }
 
-void build_keychain_sec_map(void){
+static void build_keychain_sec_map(void){
   rb_cKeychainSecMap = rb_hash_new();
   rb_hash_aset(rb_cKeychainSecMap, ID2SYM(rb_intern("created_at")), cfstring_to_rb_string(kSecAttrCreationDate));
   rb_hash_aset(rb_cKeychainSecMap, ID2SYM(rb_intern("updated_at")), cfstring_to_rb_string(kSecAttrModificationDate));
@@ -413,7 +397,13 @@ void build_keychain_sec_map(void){
   rb_const_set(rb_cKeychain, rb_intern("KEYCHAIN_MAP"), rb_cKeychainSecMap);
 }
 
-void build_protocols(void){
+static void build_classes(void){
+  VALUE classes = rb_define_module_under(rb_cKeychainItem, "Classes");
+  rb_const_set(classes, rb_intern("INTERNET"), cfstring_to_rb_string(kSecClassInternetPassword));
+  rb_const_set(classes, rb_intern("GENERIC"), cfstring_to_rb_string(kSecClassGenericPassword));
+}
+
+static void build_protocols(void){
   VALUE protocols = rb_define_module_under(rb_cKeychain, "Protocols");
 
   rb_const_set(protocols, rb_intern("FTP"), INT2NUM(kSecProtocolTypeFTP       ));
@@ -475,5 +465,7 @@ void Init_keychain(){
 
   rb_define_method(rb_cKeychainItem, "delete", RUBY_METHOD_FUNC(rb_keychain_item_delete), 0);
   rb_define_method(rb_cKeychainItem, "password", RUBY_METHOD_FUNC(rb_keychain_item_copy_password), 0);
+
+  build_classes();
 
 }
