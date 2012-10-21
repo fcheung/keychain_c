@@ -151,6 +151,18 @@ static void rb_add_value_to_cf_dictionary(CFMutableDictionaryRef dict, CFStringR
         CFRelease(numberValue);
         break;
       }
+    case T_DATA:
+      {
+        if(rb_obj_is_kind_of(value, rb_cTime)){
+          struct timespec t = rb_time_timespec(value);
+          CFAbsoluteTime abstime = t.tv_sec + t.tv_nsec / 1000000000.0 - kCFAbsoluteTimeIntervalSince1970;
+          CFDateRef cfdate = CFDateCreate(NULL, abstime);
+          CFShow(cfdate);
+          CFDictionarySetValue(dict, key, cfdate);
+          CFRelease(cfdate);
+          break;
+        }
+      }
     default:
       rb_raise(rb_eTypeError, "Can't convert value to cftype: %s", rb_obj_classname(value));
   }
@@ -234,16 +246,22 @@ static VALUE rb_keychain_item_copy_password(VALUE self){
   UInt32 dataLength;
   Data_Get_Struct(self, struct OpaqueSecKeychainItemRef, keychainItem);
 
+  VALUE unsaved = rb_ivar_get(self, rb_intern("unsaved_password"));
 
-  OSStatus result = SecKeychainItemCopyAttributesAndData(keychainItem, NULL , NULL, NULL, &dataLength, &data);
 
-  CheckOSStatusOrRaise(result);
+  if(!NIL_P(unsaved)){
+    return unsaved;
+  }
+  else{
+    OSStatus result = SecKeychainItemCopyAttributesAndData(keychainItem, NULL , NULL, NULL, &dataLength, &data);
 
-  VALUE rb_data = rb_enc_str_new(data, dataLength, rb_ascii8bit_encoding());
-  SecKeychainItemFreeAttributesAndData(NULL,data);
-  return rb_data;
+    CheckOSStatusOrRaise(result);
+
+    VALUE rb_data = rb_enc_str_new(data, dataLength, rb_ascii8bit_encoding());
+    SecKeychainItemFreeAttributesAndData(NULL,data);
+    return rb_data;
+  }
 }
-
 
 static VALUE add_conditions_to_query(VALUE pair, VALUE cfdict, int argc, VALUE argv[]){
 
@@ -275,7 +293,7 @@ static VALUE rb_keychain_add_password(VALUE self, VALUE kind, VALUE options){
   CFDictionarySetValue(attributes, kSecUseKeychain, keychain);
 
   rb_block_call(options, rb_intern("each"), 0, NULL, RUBY_METHOD_FUNC(add_conditions_to_query), (VALUE)attributes);
-  
+
   CFDictionaryRef result;
 
   OSStatus status = SecItemAdd(attributes, (CFTypeRef*)&result);
@@ -286,6 +304,99 @@ static VALUE rb_keychain_add_password(VALUE self, VALUE kind, VALUE options){
   CFRelease(result);
   return rb_keychain_item;
 }
+
+
+static VALUE copy_attributes_for_update(VALUE pair, VALUE cfdict, int argc, VALUE argv[]){
+
+  VALUE key = RARRAY_PTR(pair)[0];
+  VALUE value = RARRAY_PTR(pair)[1];
+
+  CFStringRef cf_key = rb_create_cf_string(key);
+  if(CFStringCompare(cf_key, kSecAttrCreationDate, 0) &&
+     CFStringCompare(cf_key, kSecAttrModificationDate, 0) &&
+     CFStringCompare(cf_key, kSecClass, 0)){ /*these values ared read only*/
+    
+    rb_add_value_to_cf_dictionary((CFMutableDictionaryRef)cfdict, cf_key, value);
+  }
+  CFRelease(cf_key);
+  
+  return Qnil;
+}
+
+static CFMutableDictionaryRef sec_query_identifying_item(SecKeychainItemRef item){
+  CFMutableDictionaryRef query = CFDictionaryCreateMutable(NULL, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+
+  CFArrayRef itemArray = CFArrayCreate(NULL, (const void**)&item, 1, &kCFTypeArrayCallBacks);
+
+  CFDictionarySetValue(query, kSecMatchItemList, itemArray);
+
+  CFRelease(itemArray);
+
+  return query;
+}
+
+
+static CFStringRef rb_copy_item_class(SecKeychainItemRef item){
+  SecItemClass secItemClass;
+  SecKeychainItemCopyContent(item, &secItemClass, NULL, NULL, NULL);
+  secItemClass = CFSwapInt32HostToBig(secItemClass);
+  CFStringRef cfclass = CFStringCreateWithBytes(NULL, (UInt8*)&secItemClass, sizeof(secItemClass), kCFStringEncodingUTF8, false);
+  return cfclass;
+}
+
+static VALUE rb_keychain_item_reload(VALUE self){
+  SecKeychainItemRef keychainItem=NULL;
+  UInt32 dataLength;
+  Data_Get_Struct(self, struct OpaqueSecKeychainItemRef, keychainItem);
+
+  CFMutableDictionaryRef query = sec_query_identifying_item(keychainItem);
+
+  CFDictionarySetValue(query, kSecReturnAttributes, kCFBooleanTrue);
+  CFStringRef cfclass = rb_copy_item_class(keychainItem);
+  CFDictionarySetValue(query, kSecClass, cfclass);
+  CFRelease(cfclass);
+
+  CFDictionaryRef attributes;
+  OSStatus result = SecItemCopyMatching(query, (CFTypeRef*)&attributes);
+  CFRelease(query);
+  CheckOSStatusOrRaise(result);
+  VALUE new_attributes = rb_hash_new();
+  CFDictionaryApplyFunction(attributes, cf_hash_to_rb_hash, (void*)new_attributes);
+  rb_ivar_set(self, rb_intern("@attributes"), new_attributes);
+  rb_ivar_set(self, rb_intern("unsaved_password"), Qnil);
+  CFRelease(attributes);
+
+  return self;
+}
+
+static VALUE rb_keychain_item_save(VALUE self){
+  SecKeychainItemRef keychainItem = NULL;
+  Data_Get_Struct(self, struct OpaqueSecKeychainItemRef, keychainItem);
+
+  CFMutableDictionaryRef query = sec_query_identifying_item(keychainItem);
+
+  CFMutableDictionaryRef attributes = CFDictionaryCreateMutable(NULL, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+  VALUE rb_attributes = rb_ivar_get(self, rb_intern("@attributes"));
+  rb_block_call(rb_attributes, rb_intern("each"), 0, NULL, RUBY_METHOD_FUNC(copy_attributes_for_update), (VALUE)attributes);
+
+  VALUE newPassword = rb_ivar_get(self, rb_intern("@unsaved_password"));
+  if(!NIL_P(newPassword)){
+    rb_add_value_to_cf_dictionary(attributes, kSecValueData, newPassword);
+  }
+  CFStringRef cfclass = rb_copy_item_class(keychainItem);
+  CFDictionarySetValue(query, kSecClass, cfclass);
+  CFRelease(cfclass);
+  
+  OSStatus result = SecItemUpdate(query, attributes);
+
+  CFRelease(query);
+  CFRelease(attributes);
+  CheckOSStatusOrRaise(result);
+  rb_keychain_item_reload(self);
+  return self;
+}
+
+
 
 
 static VALUE rb_keychain_find(int argc, VALUE *argv, VALUE self){
@@ -515,6 +626,8 @@ void Init_keychain(){
 
   rb_define_method(rb_cKeychainItem, "delete", RUBY_METHOD_FUNC(rb_keychain_item_delete), 0);
   rb_define_method(rb_cKeychainItem, "password", RUBY_METHOD_FUNC(rb_keychain_item_copy_password), 0);
+
+  rb_define_method(rb_cKeychainItem, "save", RUBY_METHOD_FUNC(rb_keychain_item_save), 0);
 
   build_classes();
 

@@ -35,4 +35,16 @@ describe Keychain::Item do
       subject.created_at.should be_within(2).of(Time.now)
     end
   end
+
+  describe 'save' do
+    it 'should update attributes and password' do
+      subject.password = 'new-password'
+      subject.account = 'new-account'
+      subject.save
+
+      fresh = @keychain.generic_passwords.find :first, :conditions => {:service => 'some-service'}
+      fresh.password.should == 'new-password'
+      fresh.account.should == 'new-account'
+    end
+  end
 end

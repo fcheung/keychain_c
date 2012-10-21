@@ -61,4 +61,8 @@ class Keychain::Item
       end
     end
   end
+
+  def password=(new_password)
+    @unsaved_password = new_password
+  end
 end
