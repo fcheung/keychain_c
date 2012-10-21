@@ -1,4 +1,37 @@
 Keychain
 ========
 
-A ruby wrapper around some of OS X's keychain functions
+A ruby wrapper around some of OS X's keychain functions. The keychain can store several types of information, including internet passwords and generic passwords.
+
+Finding a generic password:
+
+    Keychain.generic_passwords.find :first, :conditions => {:service => 'dummy'}
+
+Finding an internet password:
+
+    Keychain.internet_passwords.find :first, :conditions => {:server => 'dummy.example.com'}
+
+Finding all matching items
+
+    Keychain.internet_passwords.find :all, :conditions => {:server => 'dummy.example.com'}
+
+You can load a keychain with `Keychain.open` or `Keychain.new` or retrive the default keychain with `Keychain.default`
+
+
+Creating a password:
+
+    #in the default keychain
+    Keychain.internet_passwords.add :server => 'dummy.example.com', :password => 'somempasswrd'
+    Keychain.generic_passwords.add :service => 'dummy', :password => 'somempasswrd', :account => 'an_account'
+
+    #in a specific keychain
+
+    some_keychain.internet_passwords.add :server => 'dummy.example.com', :password => 'somempasswrd'
+    some_keychain.generic_passwords.add :service => 'dummy', :password => 'somempasswrd', :account => 'an_account'
+
+#updating an item
+
+    item = Keychain.internet_passwords.find :first, :conditions => {:server => 'dummy.example.com'}
+    item.comment = 'a comment'
+    item.password = 'new password'
+    item.save
