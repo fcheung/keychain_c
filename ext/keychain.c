@@ -154,10 +154,9 @@ static void rb_add_value_to_cf_dictionary(CFMutableDictionaryRef dict, CFStringR
     case T_DATA:
       {
         if(rb_obj_is_kind_of(value, rb_cTime)){
-          struct timespec t = rb_time_timespec(value);
-          CFAbsoluteTime abstime = t.tv_sec + t.tv_nsec / 1000000000.0 - kCFAbsoluteTimeIntervalSince1970;
+          VALUE floatTime = rb_funcall(value, rb_intern("to_f"),0);
+          CFAbsoluteTime abstime = RFLOAT_VALUE(floatTime) - kCFAbsoluteTimeIntervalSince1970;
           CFDateRef cfdate = CFDateCreate(NULL, abstime);
-          CFShow(cfdate);
           CFDictionarySetValue(dict, key, cfdate);
           CFRelease(cfdate);
           break;
