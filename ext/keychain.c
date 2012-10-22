@@ -42,7 +42,7 @@ static CFStringRef rb_create_cf_string(VALUE string){
 
 static CFDataRef rb_create_cf_data(VALUE string){
   StringValue(string);
-  if(ENCODING_IS_ASCII8BIT(rb_obj_encoding(string))){
+  if(rb_enc_get_index(rb_obj_encoding(string))== rb_ascii8bit_encindex()){
     return CFDataCreate(NULL, (UInt8*)RSTRING_PTR(string), RSTRING_LEN(string));
   }
   else{
