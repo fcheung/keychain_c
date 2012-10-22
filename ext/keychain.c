@@ -8,6 +8,8 @@ VALUE rb_eKeychainDuplicateItemError;
 VALUE rb_cKeychainItem;
 
 VALUE rb_cKeychainSecMap;
+
+VALUE rb_cPointerWrapper;
 static void CheckOSStatusOrRaise(OSStatus err){
   if(err != 0){
     CFStringRef description = SecCopyErrorMessageString(err, NULL);
@@ -262,13 +264,15 @@ static VALUE rb_keychain_item_copy_password(VALUE self){
   }
 }
 
-static VALUE add_conditions_to_query(VALUE pair, VALUE cfdict, int argc, VALUE argv[]){
+static VALUE add_conditions_to_query(VALUE pair, VALUE r_cfdict, int argc, VALUE argv[]){
 
   VALUE key = RARRAY_PTR(pair)[0];
   VALUE value = RARRAY_PTR(pair)[1];
 
   VALUE sec_key = rb_hash_aref(rb_cKeychainSecMap, key);
   if(!NIL_P(sec_key)){
+    CFDictionaryRef cfdict;
+    Data_Get_Struct(r_cfdict, struct __CFDictionary , cfdict);
     CFStringRef cf_key = rb_create_cf_string(sec_key);
     rb_add_value_to_cf_dictionary((CFMutableDictionaryRef)cfdict, cf_key, value);
     CFRelease(cf_key);
@@ -291,7 +295,9 @@ static VALUE rb_keychain_add_password(VALUE self, VALUE kind, VALUE options){
   CFDictionarySetValue(attributes, kSecReturnRef, kCFBooleanTrue);
   CFDictionarySetValue(attributes, kSecUseKeychain, keychain);
 
-  rb_block_call(options, rb_intern("each"), 0, NULL, RUBY_METHOD_FUNC(add_conditions_to_query), (VALUE)attributes);
+  VALUE rAttributes = Data_Wrap_Struct(rb_cPointerWrapper, NULL, NULL, attributes);
+
+  rb_block_call(options, rb_intern("each"), 0, NULL, RUBY_METHOD_FUNC(add_conditions_to_query), (VALUE)rAttributes);
 
   CFDictionaryRef result;
 
@@ -305,7 +311,7 @@ static VALUE rb_keychain_add_password(VALUE self, VALUE kind, VALUE options){
 }
 
 
-static VALUE copy_attributes_for_update(VALUE pair, VALUE cfdict, int argc, VALUE argv[]){
+static VALUE copy_attributes_for_update(VALUE pair, VALUE r_cfdict, int argc, VALUE argv[]){
 
   VALUE key = RARRAY_PTR(pair)[0];
   VALUE value = RARRAY_PTR(pair)[1];
@@ -315,7 +321,10 @@ static VALUE copy_attributes_for_update(VALUE pair, VALUE cfdict, int argc, VALU
      CFStringCompare(cf_key, kSecAttrModificationDate, 0) &&
      CFStringCompare(cf_key, kSecClass, 0)){ /*these values ared read only*/
     
-    rb_add_value_to_cf_dictionary((CFMutableDictionaryRef)cfdict, cf_key, value);
+    CFMutableDictionaryRef cfdict;
+    Data_Get_Struct(r_cfdict, struct __CFDictionary , cfdict);
+
+    rb_add_value_to_cf_dictionary(cfdict, cf_key, value);
   }
   CFRelease(cf_key);
   
@@ -376,7 +385,10 @@ static VALUE rb_keychain_item_save(VALUE self){
 
   CFMutableDictionaryRef attributes = CFDictionaryCreateMutable(NULL, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
   VALUE rb_attributes = rb_ivar_get(self, rb_intern("@attributes"));
-  rb_block_call(rb_attributes, rb_intern("each"), 0, NULL, RUBY_METHOD_FUNC(copy_attributes_for_update), (VALUE)attributes);
+
+  VALUE attributes_wrapper = Data_Wrap_Struct(rb_cPointerWrapper, NULL, NULL, attributes);
+
+  rb_block_call(rb_attributes, rb_intern("each"), 0, NULL, RUBY_METHOD_FUNC(copy_attributes_for_update), (VALUE)attributes_wrapper);
 
   VALUE newPassword = rb_ivar_get(self, rb_intern("@unsaved_password"));
   if(!NIL_P(newPassword)){
@@ -449,7 +461,8 @@ static VALUE rb_keychain_find(int argc, VALUE *argv, VALUE self){
     
     if(!NIL_P(conditions)){
       Check_Type(conditions, T_HASH);
-      rb_block_call(conditions, rb_intern("each"), 0, NULL, RUBY_METHOD_FUNC(add_conditions_to_query), (VALUE)query);
+      VALUE rQuery = Data_Wrap_Struct(rb_cPointerWrapper, NULL, NULL, query);
+      rb_block_call(conditions, rb_intern("each"), 0, NULL, RUBY_METHOD_FUNC(add_conditions_to_query), rQuery);
     }
   }
 
@@ -629,5 +642,7 @@ void Init_keychain(){
   rb_define_method(rb_cKeychainItem, "save", RUBY_METHOD_FUNC(rb_keychain_item_save), 0);
 
   build_classes();
+
+  rb_cPointerWrapper  = rb_define_class_under(rb_cKeychain, "PointerWrapper", rb_cObject);
 
 }
