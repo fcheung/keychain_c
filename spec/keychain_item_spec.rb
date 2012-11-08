@@ -2,16 +2,26 @@ require 'spec_helper'
 
 describe Keychain::Item do 
   before(:each) do
-    @keychain = Keychain.new(File.join(Dir.tmpdir, "keychain_spec_#{Time.now.to_i}_#{Time.now.usec}_#{rand(1000)}.keychain"), 'pass')
-    @keychain.generic_passwords.add :service => 'some-service', :account => 'some-account', :password => 'some-password'
+    @keychain = Keychain.create(File.join(Dir.tmpdir, "keychain_spec_#{Time.now.to_i}_#{Time.now.usec}_#{rand(1000)}.keychain"), 'pass')
+    @keychain.generic_passwords.create :service => 'some-service', :account => 'some-account', :password => 'some-password'
   end
 
   after(:each) do
     @keychain.delete
   end
 
-  subject {@keychain.generic_passwords.find :first, :conditions => {:service => 'some-service'}}
+  def find_item
+    @keychain.generic_passwords.where(:service => 'some-service').first
+  end
 
+  subject {find_item}
+
+  describe 'keychain' do
+    it 'should return the keychain containing the item' do
+      subject.keychain.should == @keychain
+    end
+  end
+  
   describe 'password' do
     it 'should retrieve the password' do
       subject.password.should == 'some-password'
@@ -40,11 +50,18 @@ describe Keychain::Item do
     it 'should update attributes and password' do
       subject.password = 'new-password'
       subject.account = 'new-account'
-      subject.save
+      subject.save!
 
-      fresh = @keychain.generic_passwords.find :first, :conditions => {:service => 'some-service'}
+      fresh = find_item
       fresh.password.should == 'new-password'
       fresh.account.should == 'new-account'
+    end
+  end
+
+  describe 'delete' do
+    it 'should remove the item from the keychain' do
+      subject.delete
+      find_item.should be_nil
     end
   end
 end

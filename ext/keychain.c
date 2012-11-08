@@ -5,6 +5,8 @@
 VALUE rb_cKeychain;
 VALUE rb_eKeychainError;
 VALUE rb_eKeychainDuplicateItemError;
+VALUE rb_eKeychainNoSuchKeychainError;
+VALUE rb_eKeychainAuthFailedError;
 VALUE rb_cKeychainItem;
 
 VALUE rb_cKeychainSecMap;
@@ -24,6 +26,12 @@ static void CheckOSStatusOrRaise(OSStatus err){
     VALUE exception = Qnil;
 
     switch(err){
+      case errSecAuthFailed:
+        exception = rb_obj_alloc(rb_eKeychainAuthFailedError);
+        break;
+      case errSecNoSuchKeychain:
+        exception = rb_obj_alloc(rb_eKeychainNoSuchKeychainError);
+        break;
       case errSecDuplicateItem:
         exception = rb_obj_alloc(rb_eKeychainDuplicateItemError);
         break;
@@ -191,7 +199,7 @@ static VALUE rb_open_keychain(VALUE self, VALUE path){
   return KeychainFromSecKeychainRef(keychain);
 }
 
-static VALUE rb_new_keychain(int argc, VALUE *argv, VALUE self){
+static VALUE rb_create_keychain(int argc, VALUE *argv, VALUE self){
   VALUE password, path;
   rb_scan_args(argc, argv, "11", &path, &password);
 
@@ -515,7 +523,7 @@ static void build_keychain_sec_map(void){
   rb_hash_aset(rb_cKeychainSecMap, ID2SYM(rb_intern("path")), cfstring_to_rb_string(kSecAttrPath));
   rb_hash_aset(rb_cKeychainSecMap, ID2SYM(rb_intern("protocol")), cfstring_to_rb_string(kSecAttrProtocol));
   rb_hash_aset(rb_cKeychainSecMap, ID2SYM(rb_intern("password")), cfstring_to_rb_string(kSecValueData));
-  rb_hash_aset(rb_cKeychainSecMap, ID2SYM(rb_intern("kind")), cfstring_to_rb_string(kSecClass));
+  rb_hash_aset(rb_cKeychainSecMap, ID2SYM(rb_intern("klass")), cfstring_to_rb_string(kSecClass));
 
   rb_const_set(rb_cKeychain, rb_intern("KEYCHAIN_MAP"), rb_cKeychainSecMap);
 }
@@ -610,36 +618,105 @@ static VALUE rb_keychain_settings_set_lock_interval(VALUE self, VALUE newValue){
   return newValue;
 }
 
+static VALUE rb_keychain_lock(VALUE self){
+  SecKeychainRef keychain=NULL;
+  Data_Get_Struct(self, struct OpaqueSecKeychainRef, keychain);
+  OSStatus result = SecKeychainLock(keychain);
+  CheckOSStatusOrRaise(result);
+
+  return Qnil;
+}
+
+static VALUE rb_keychain_unlock(int argc, VALUE *argv, VALUE self){
+  SecKeychainRef keychain=NULL;
+  Data_Get_Struct(self, struct OpaqueSecKeychainRef, keychain);
+
+  VALUE password;
+  rb_scan_args(argc, argv, "01", &password);
+
+  OSStatus result = noErr;
+  if(password){
+    StringValue(password);
+    password = rb_str_export_to_enc(password, rb_utf8_encoding());
+
+    result = SecKeychainUnlock(keychain, (UInt32)RSTRING_LEN(password), (UInt8*)RSTRING_PTR(password), true);
+  }else{
+    result = SecKeychainUnlock(keychain,0,NULL,false);
+  }
+
+  CheckOSStatusOrRaise(result);
+
+  return Qnil;
+}
+
+static VALUE rb_keychain_status(VALUE self){
+  UInt32 status;
+  SecKeychainRef keychain=NULL;
+  Data_Get_Struct(self, struct OpaqueSecKeychainRef, keychain);
+  OSStatus result = SecKeychainGetStatus(keychain, &status);
+  CheckOSStatusOrRaise(result);
+  return UINT2NUM(status);
+}
+
+static VALUE rb_keychain_item_keychain(VALUE self){
+  SecKeychainRef keychain=NULL;
+  SecKeychainItemRef item=NULL;
+  Data_Get_Struct(self, struct OpaqueSecKeychainItemRef, item);
+  OSStatus result = SecKeychainItemCopyKeychain(item,&keychain);
+  CheckOSStatusOrRaise(result);
+  return KeychainFromSecKeychainRef(keychain);
+}
+
+static VALUE rb_keychain_compare(VALUE self, VALUE other){
+  SecKeychainRef keychain=NULL;
+  SecKeychainRef otherKeychain=NULL;
+  Data_Get_Struct(self, struct OpaqueSecKeychainRef, keychain);
+  Data_Get_Struct(other, struct OpaqueSecKeychainRef, otherKeychain);
+
+  return CFEqual(keychain, otherKeychain);
+}
+
 void Init_keychain(){
   rb_cKeychain = rb_const_get(rb_cObject, rb_intern("Keychain"));
   rb_eKeychainError = rb_const_get(rb_cKeychain, rb_intern("Error"));
   rb_eKeychainDuplicateItemError = rb_const_get(rb_cKeychain, rb_intern("DuplicateItemError"));
+  rb_eKeychainNoSuchKeychainError = rb_const_get(rb_cKeychain, rb_intern("NoSuchKeychainError"));
+  rb_eKeychainAuthFailedError = rb_const_get(rb_cKeychain, rb_intern("AuthFailedError"));
 
   build_keychain_sec_map();
   build_protocols();
 
   rb_define_singleton_method(rb_cKeychain, "default", RUBY_METHOD_FUNC(rb_default_keychain), 0);
   rb_define_singleton_method(rb_cKeychain, "open", RUBY_METHOD_FUNC(rb_open_keychain), 1);
-  rb_define_singleton_method(rb_cKeychain, "new", RUBY_METHOD_FUNC(rb_new_keychain), -1);
+  rb_define_singleton_method(rb_cKeychain, "create", RUBY_METHOD_FUNC(rb_create_keychain), -1);
 
   rb_define_singleton_method(rb_cKeychain, "find", RUBY_METHOD_FUNC(rb_keychain_find), -1);
+
+  rb_define_method(rb_cKeychain, "==", RUBY_METHOD_FUNC(rb_keychain_compare), 1);
+
+  rb_define_method(rb_cKeychain, "lock!", RUBY_METHOD_FUNC(rb_keychain_lock), 0);
+  rb_define_method(rb_cKeychain, "unlock!", RUBY_METHOD_FUNC(rb_keychain_unlock), -1);
 
   rb_define_method(rb_cKeychain, "delete", RUBY_METHOD_FUNC(rb_keychain_delete), 0);
   rb_define_method(rb_cKeychain, "path", RUBY_METHOD_FUNC(rb_keychain_path), 0);
   rb_define_method(rb_cKeychain, "add_password", RUBY_METHOD_FUNC(rb_keychain_add_password), 2);
 
-  rb_define_method(rb_cKeychain, "lock_on_sleep", RUBY_METHOD_FUNC(rb_keychain_settings_lock_on_sleep), 0);
+  rb_define_method(rb_cKeychain, "lock_on_sleep?", RUBY_METHOD_FUNC(rb_keychain_settings_lock_on_sleep), 0);
   rb_define_method(rb_cKeychain, "lock_on_sleep=", RUBY_METHOD_FUNC(rb_keychain_settings_set_lock_on_sleep), 1);
   
   rb_define_method(rb_cKeychain, "lock_interval", RUBY_METHOD_FUNC(rb_keychain_settings_lock_interval), 0);
   rb_define_method(rb_cKeychain, "lock_interval=", RUBY_METHOD_FUNC(rb_keychain_settings_set_lock_interval), 1);
+
+  rb_define_method(rb_cKeychain, "status", RUBY_METHOD_FUNC(rb_keychain_status), 0);
+
 //we don't bother with use_lock_interval - the underlying api appears to ignore it ( see http://www.opensource.apple.com/source/libsecurity_keychain/libsecurity_keychain-55050.9/lib/SecKeychain.cpp )
   rb_cKeychainItem = rb_define_class_under(rb_cKeychain, "Item", rb_cObject);
+  rb_define_method(rb_cKeychainItem, "keychain", RUBY_METHOD_FUNC(rb_keychain_item_keychain), 0);
 
   rb_define_method(rb_cKeychainItem, "delete", RUBY_METHOD_FUNC(rb_keychain_item_delete), 0);
   rb_define_method(rb_cKeychainItem, "password", RUBY_METHOD_FUNC(rb_keychain_item_copy_password), 0);
 
-  rb_define_method(rb_cKeychainItem, "save", RUBY_METHOD_FUNC(rb_keychain_item_save), 0);
+  rb_define_method(rb_cKeychainItem, "save!", RUBY_METHOD_FUNC(rb_keychain_item_save), 0);
 
   build_classes();
 
