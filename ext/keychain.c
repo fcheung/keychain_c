@@ -289,7 +289,6 @@ static VALUE add_conditions_to_query(VALUE pair, VALUE r_cfdict, int argc, VALUE
 }
 
 static VALUE rb_keychain_add_password(VALUE self, VALUE kind, VALUE options){
-  SecKeychainItemRef keychainItem = NULL;
   SecKeychainRef keychain=NULL;
   Data_Get_Struct(self, struct OpaqueSecKeychainRef, keychain);
 
@@ -362,7 +361,6 @@ static CFStringRef rb_copy_item_class(SecKeychainItemRef item){
 
 static VALUE rb_keychain_item_reload(VALUE self){
   SecKeychainItemRef keychainItem=NULL;
-  UInt32 dataLength;
   Data_Get_Struct(self, struct OpaqueSecKeychainItemRef, keychainItem);
 
   CFMutableDictionaryRef query = sec_query_identifying_item(keychainItem);
